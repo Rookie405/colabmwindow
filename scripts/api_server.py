@@ -200,12 +200,15 @@ def generate(prompt, max_tokens, temperature=None, top_p=None, top_k=None, min_p
         min_p=0.0 if min_p is None else float(min_p),
     )
     with LOCK:
+        t0 = time.time()
         text, last = GEN.generate(prompt, max_new_tokens=max_tokens, sampler=sampler,
                                   stop_conditions=STOP, add_bos=False,
                                   encode_special_tokens=True, completion_only=True,
                                   return_last_results=True)
+        gen_s = time.time() - t0
     r = dict(last) if isinstance(last, dict) else {}
     r["text"] = text or ""
+    r["gen_seconds"] = gen_s
     return r
 
 
@@ -292,8 +295,9 @@ class Handler(BaseHTTPRequestHandler):
         hit = (100.0 * ct / pt) if pt else 0.0
         reason = r.get("eos_reason") or "stop"
         finish = "length" if reason == "max_new_tokens" else "stop"
-        print("[api] template=%s prompt=%d cached=%d (%.1f%% hit) new=%d end=%s"
-              % (how, pt, ct, hit, nt, reason), flush=True)
+        gs = r.get("gen_seconds") or 0.0
+        print("[api] template=%s prompt=%d cached=%d (%.1f%% hit) new=%d end=%s %.2fs (%.1f tok/s)"
+              % (how, pt, ct, hit, nt, reason, gs, nt / gs if gs else 0), flush=True)
 
         cid = "chatcmpl-%d" % int(time.time() * 1000)
         if not stream:
@@ -303,7 +307,8 @@ class Handler(BaseHTTPRequestHandler):
                 "choices": [{"index": 0, "finish_reason": finish,
                              "message": {"role": "assistant", "content": text}}],
                 "usage": {"prompt_tokens": pt, "completion_tokens": nt,
-                          "total_tokens": pt + nt}})
+                          "total_tokens": pt + nt, "cached_tokens": ct,
+                          "gen_seconds": round(r.get("gen_seconds", 0.0), 3)}})
 
         # Streaming: this build has no incremental callback here, so the whole
         # completion is delivered as one delta followed by [DONE]. Clients that

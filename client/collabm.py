@@ -117,6 +117,12 @@ def expand_mentions(text, cwd):
 
 
 def split_thinking(text):
+    # Qwen templates put the opening "<think>" into the generation prompt, so the completion is
+    # usually "reasoning...</think>answer" with no opening tag.
+    if "</think>" in text and "<think>" not in text.split("</think>", 1)[0]:
+        head, _, rest = text.partition("</think>")
+        more, answer = split_thinking(rest)
+        return (head.strip() + ("\n" + more if more else "")).strip(), answer
     thoughts = "\n".join(t.strip() for t in THINK_RE.findall(text))
     answer = THINK_RE.sub("", text)
     # model may emit an unclosed <think> if it hit max_tokens mid-thought
@@ -255,8 +261,10 @@ class App:
         if getattr(self, "last_finish", None) == "length":
             console.print("[yellow]  (cut off at /max %d tokens - raise /max or ask to continue)[/]" % self.max_tokens)
         pt = self.last_usage.get("prompt_tokens", 0)
-        console.print("[dim]  %d in / %d out · %.1fs · %.1f tok/s end-to-end[/]\n"
-                      % (pt, nt, secs, nt / secs if secs else 0))
+        gen = self.last_usage.get("gen_seconds")
+        server = (" · server %.1fs = %.0f tok/s" % (gen, nt / gen)) if gen else ""
+        console.print("[dim]  %d in / %d out · %.1fs · %.1f tok/s end-to-end%s[/]\n"
+                      % (pt, nt, secs, nt / secs if secs else 0, server))
 
     def log(self, user, assistant):
         with self.transcript.open("a", encoding="utf-8") as fh:
