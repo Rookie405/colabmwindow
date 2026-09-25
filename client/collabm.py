@@ -43,7 +43,9 @@ LOCAL = ROOT / ".local"
 ENDPOINT_FILE = LOCAL / "endpoint.json"
 
 DEFAULT_SYSTEM = (
-    "You are a helpful, precise assistant. Answer in the language the user writes in. "
+    "You are a helpful, precise assistant. The user works in both Chinese and English: "
+    "reply in the language of the user's latest message (Chinese or English; mixed is fine, "
+    "and technical terms may stay in English). "
     "Use Markdown for structure and fenced code blocks for code. "
     "When files are attached they appear between <file path=...> tags."
 )

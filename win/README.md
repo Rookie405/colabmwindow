@@ -69,6 +69,42 @@ unattended VM after ~90 min.
   `JupyterSubprotocol`, so every `colab exec` fails with `AttributeError`. Do not
   `uv tool upgrade google-colab-cli` (it reverts this); re-run `win\setup.ps1` if you do.
 
+## Decode speed vs what collabm shows
+
+collabm prints two numbers after each reply, e.g.
+`227 in / 56 out · 7.3s · 7.6 tok/s end-to-end · server 1.1s = 51 tok/s`.
+
+| number | what it measures |
+|---|---|
+| **server tok/s** | generated tokens / time inside the Generator on the A100 (prefill + decode) |
+| **end-to-end tok/s** | generated tokens / wall time seen by the client, including everything below |
+
+Reference figures on this box (upstream `docs/MEASURED.md`, A100-80GB, Q4 KV):
+
+| | tok/s |
+|---|---:|
+| decode, MTP `ndt=4` | 75-97 (78.6 at ~0 ctx, 97.4 at 30K, 90.1 at 114K) |
+| decode, no MTP | ~56 |
+| prefill | ~2,500-2,800 (`-Gcs 8192`: ~3,900) |
+
+Why end-to-end is lower, especially for short replies:
+
+- **Fixed overhead per request**: HTTPS through the cloudflared quick tunnel to the Colab region
+  and back, plus JSON handling - roughly 0.5-2 s regardless of length. A 56-token reply is
+  dominated by it; a 2,000-token reply barely notices it.
+- **No streaming yet**: the reply arrives in one piece at the end, so time-to-first-token equals
+  the whole generation time.
+- **First request after (re)load** pays a one-time kernel autotune (several seconds).
+- **Thinking tokens count**: `out` includes the hidden `<think>` reasoning, which is often most
+  of the tokens.
+- **Prefill**: long prompts (big `@file` attachments, long conversations) add prompt_tokens /
+  ~2,700 s; repeated prefixes hit the prompt cache (`cached` in the server log) and are nearly free.
+- **MTP acceptance varies** with the text (42-64% measured); code and repetitive text decode faster.
+
+To measure the card rather than the network, ask for a long answer (1,000+ tokens) and read the
+`server` figure; the server also logs `new=... end=... Xs (Y tok/s)` per request in
+`/content/serve.log`.
+
 ## Windows compatibility shim
 
 google-colab-cli 0.7.x imports the POSIX-only `termios` module at startup, so every `colab`

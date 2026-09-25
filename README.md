@@ -17,6 +17,9 @@ collabm-down     # STOP THE VM when done (~7.52 CU/h while up)
 
 - Windows guide and changes vs upstream: [`win/README.md`](win/README.md)
 - Chinese manual (中文手册): [`docs/manual_zh.html`](docs/manual_zh.html)
+- Speed: decode on the A100 is ~75-97 tok/s with MTP; collabm also shows an *end-to-end* figure
+  that includes tunnel latency and is much lower for short replies - see
+  [`win/README.md#decode-speed-vs-what-collabm-shows`](win/README.md#decode-speed-vs-what-collabm-shows).
 - Chat client: [`client/collabm.py`](client/collabm.py); default workspace is created from
   [`workspace-template/`](workspace-template/) next to the repo as `collabm-workspace/`.
 
