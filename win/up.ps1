@@ -93,6 +93,7 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 45
     if (-not $served) {
         $b = Invoke-Colab exec -s $Session --timeout 60 -f (Join-Path $ScriptsDir 'bootstrap_ok.py')
+        if ($b -like 'COLAB_TIMEOUT*') { Say "  status query timed out (network hiccup) - retrying"; continue }
         if ($b -match 'bootstrap_failed') {
             Say "!! bootstrap failed:`n$b"
             Say "   the VM is still billing - fix and re-run, or stop it: win\down.ps1"
@@ -118,6 +119,7 @@ while ((Get-Date) -lt $deadline) {
         }
     }
     $s = Invoke-Colab exec -s $Session --timeout 60 -f (Join-Path $ScriptsDir 'status.py')
+    if ($s -like 'COLAB_TIMEOUT*') { Say "  status query timed out (network hiccup) - retrying"; continue }
     $stage = ($s -split "`n" | Where-Object { $_ -match '^stage:' }) -join ''
     if (-not $stage) { Say "  !! status.py gave no stage line:`n$s" } else { Say "  $($stage.Trim())" }
     if ($s -match 'serve_failed|serve_timeout') {

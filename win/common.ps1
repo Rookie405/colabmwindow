@@ -79,13 +79,37 @@ function Write-LfFile([string]$path, [string]$text) {
 }
 
 function Invoke-Colab {
-    # Runs the colab CLI, returns stdout+stderr as one string, never throws on nonzero exit.
+    # Runs the colab CLI and returns stdout+stderr as one string; never throws on nonzero exit.
+    # Hard wall-clock timeout: `colab exec --timeout N` only limits the remote code, and a
+    # dropped websocket/proxy connection can otherwise hang the call (and up.ps1) forever.
+    # Timeout = N + 90 s when --timeout N is given, else 180 s. On timeout the process tree is
+    # killed, $LASTEXITCODE = 124 and the output starts with COLAB_TIMEOUT.
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgList)
-    $colab = Get-ColabExe
-    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    try   { $out = & $colab @ArgList 2>&1 | ForEach-Object { "$_" } | Out-String }
-    finally { $ErrorActionPreference = $prev }
-    return $out
+    $limit = 180
+    $i = [array]::IndexOf($ArgList, '--timeout')
+    if ($i -ge 0 -and $i + 1 -lt $ArgList.Count) { $limit = [int][double]$ArgList[$i + 1] + 90 }
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-ColabExe))
+    foreach ($a in $ArgList) { $psi.ArgumentList.Add([string]$a) }
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.RedirectStandardInput = $true           # never wait on the console for input
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    $psi.StandardOutputEncoding = $utf8
+    $psi.StandardErrorEncoding = $utf8
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $p.StandardInput.Close()
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    if (-not $p.WaitForExit($limit * 1000)) {
+        try { $p.Kill($true) } catch {}
+        $global:LASTEXITCODE = 124
+        return "COLAB_TIMEOUT after ${limit}s: colab $($ArgList -join ' ')"
+    }
+    $p.WaitForExit()
+    $global:LASTEXITCODE = $p.ExitCode
+    return ($outTask.Result + $errTask.Result)
 }
 
 function Get-Endpoint {
