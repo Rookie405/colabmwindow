@@ -1,0 +1,24 @@
+collabosm - NOTICE
+
+This repository contains NO model weights. Everything in scripts/ and docs/ is ours (MIT).
+
+Model
+  Qwen3.8-Flash-Next exl3 quantizations by turboderp
+    https://huggingface.co/turboderp/Qwen3.8-Flash-Next-exl3
+    revision used here: 4.05bpw_h6_ng6
+    sha: 55a732e0c4c3d4614bc42b68493bb930d9b02c0a
+  The weights carry their own licence, published in the repository above. Read it before you
+  redistribute anything derived from them, and note that serving a model to others is a separate
+  question from downloading it. We link and pin; we do not mirror.
+
+Runtime
+  ExLlamaV3 (MIT) - https://github.com/turboderp-org/exllamav3
+    pinned: v1.5.1, prebuilt wheel referenced in manifest.json
+
+Tooling we depend on at run time, but do not vendor
+  google-colab-cli (Apache-2.0) - https://github.com/googlecolab/colab-cli
+  cloudflared (Apache-2.0)       - quick tunnels only, for reaching a localhost port
+  huggingface_hub (Apache-2.0)
+
+Measurements in docs/MEASURED.md were produced by this kit on a single Colab A100-80GB High-RAM.
+Numbers from other people's hardware are attributed where used.

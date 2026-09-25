@@ -1,0 +1,67 @@
+{
+  "name": "collabosm",
+  "description": "Run Qwen3.8-Flash-Next (125B-A6B MoE, hybrid Gated-DeltaNet + full attention) on ONE Colab A100-80GB High-RAM, via ExLlamaV3 with Q4 KV, MTP speculative decoding and a pinned-RAM second-tier KV page cache.",
+  "updated": "2026-09-24",
+  "verified_on": {
+    "host": "Google Colab",
+    "accelerator": "A100-SXM4-80GB",
+    "shape": "HIGH_RAM",
+    "vram_GiB": 79.3,
+    "ram_GiB": 167,
+    "cpus": 12,
+    "cu_per_hour": 7.52,
+    "note": "mts: the HIGH_RAM shape is NOT what `colab new --gpu A100` returns. See scripts/restore.py."
+  },
+  "model": {
+    "repo": "turboderp/Qwen3.8-Flash-Next-exl3",
+    "revision": "4.05bpw_h6_ng6",
+    "sha": "55a732e0c4c3d4614bc42b68493bb930d9b02c0a",
+    "total_bytes": 107463600896,
+    "local_dir": "/content/exl3",
+    "measured_download_seconds": 280,
+    "measured_download_note": "~380 MB/s anonymous from HF; the same 100 GiB took 4 min 40 s",
+    "alternate_branches": ["6.05bpw_h6_ng6", "5.05bpw_h6_ng6", "4.05bpw_h6_ng6", "3.05bpw_h5_ng5", "2.05bpw_h4_ng4"],
+    "key_files": {
+      "shards": "model-0000X-of-00009.safetensors",
+      "index": "model.safetensors.index.json",
+      "ngram_table": {"file": "ngram_embedding.safetensors", "bytes": 39040193720,
+                      "note": "the PLE/n-gram table. ExLlamaV3 keeps it in HOST RAM via -ngr; it is what makes a 100 GiB pack fit on one 80 GB card."},
+      "vision": {"file": "vision_k6.safetensors", "bytes": 561389181}
+    }
+  },
+  "runtime": {
+    "name": "exllamav3",
+    "version": "1.5.1",
+    "install": {
+      "wheel": {
+        "url": "https://github.com/turboderp-org/exllamav3/releases/download/v1.5.1/exllamav3-1.5.1%2Bcu128.torch2.11.0-cp313-cp313-linux_x86_64.whl",
+        "bytes": 448580691,
+        "abi": "cp313 / torch 2.11.0 / cu128",
+        "note": "Prebuilt. NO compile step. The wheel is ABI-bound to (python, torch, cuda), so scripts/bootstrap.sh probes the image and builds the URL from this ABI."
+      },
+      "source": {
+        "repo": "https://github.com/turboderp-org/exllamav3",
+        "tag": "v1.5.1",
+        "note": "Fallback only. Compiling costs metered minutes; the wheel is the default."
+      }
+    }
+  },
+  "measured": {
+    "note": "All figures measured on the box above. Prefill prompts were synthetic filler; see docs/MEASURED.md for the provenance and the caveats.",
+    "prefill_tps": {"4143": 2498, "30256": 2806, "114097": 2793},
+    "decode_tps_mtp_ndt4": {"ctx_85": 78.6, "ctx_30254": 97.4, "ctx_114095": 90.1},
+    "decode_tps_no_mtp": 56.0,
+    "gcs_sweep_prefill_tps": {"1024": 2204, "2048": 2806, "4096": 3360, "8192": 3882},
+    "kv_bytes_per_token": 10752,
+    "warm_cache_restore": {"cold_s": 15.62, "restored_s": 0.58, "speedup": 27, "pages_restored": 104}
+  },
+  "defaults": {
+    "cache_size": 262144,
+    "cache_quant": "4",
+    "generator_chunk_size": 4096,
+    "num_draft_tokens": 4,
+    "cpu_cache_size_gb": 0,
+    "recurrent_cache_size_gb": 4,
+    "port": 8090
+  }
+}
