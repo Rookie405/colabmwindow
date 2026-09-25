@@ -18,7 +18,8 @@ param(
     [int]$Gcs                 = 4096,     # generator chunk size (8192 = faster prefill)
     [int]$Port                = 8090,
     [int]$WaitMin             = 50,
-    [switch]$KeepAlive                    # hold the VM open (costs CU while idle!)
+    [switch]$KeepAlive,                   # hold the VM open (costs CU while idle!)
+    [switch]$RestartServer                # reload api_server.py even if one is running (after server updates; ~2-3 min)
 )
 $script:Tag = 'up'
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -100,7 +101,7 @@ while ((Get-Date) -lt $deadline) {
         if ($b -match 'bootstrap_ok') {
             # Don't restart a server that is already up (a restart reloads the model: 2-6 min).
             $pre = Invoke-Colab exec -s $Session --timeout 60 -f (Join-Path $ScriptsDir 'status.py')
-            if ($pre -match 'health:\s+200' -or $pre -match 'engine_running:\s+True') {
+            if (-not $RestartServer -and ($pre -match 'health:\s+200' -or $pre -match 'engine_running:\s+True')) {
                 Say 'bootstrap OK, API server already running/loading -> reusing it'
             } else {
                 Say 'bootstrap OK -> launching serve.sh (model load 2-6 min)'

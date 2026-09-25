@@ -40,11 +40,13 @@ if os.path.isdir(os.path.join(SRC, "examples")):
     sys.path.insert(0, os.path.join(SRC, "examples"))
 
 from exllamav3 import Generator, model_init  # noqa: E402
+from exllamav3.generator.sampler import ComboSampler  # noqa: E402
 
 try:
-    from jinja2 import Template as JTemplate
+    import jinja2
+    from jinja2.sandbox import ImmutableSandboxedEnvironment
 except Exception:
-    JTemplate = None
+    jinja2 = None
 
 LOCK = threading.Lock()
 # Bearer-key check. serve.sh writes the key before starting this process; upstream generated
@@ -55,6 +57,7 @@ API_KEY = (os.environ.get("API_KEY") or
 GEN = None
 TOK = None
 ARGS = None
+STOP = None       # stop conditions: EOS ids + <|im_end|>
 
 
 def build_engine():
@@ -100,21 +103,71 @@ def build_engine():
     # ONE Generator for the process lifetime -- see the module docstring.
     GEN = Generator(model=model, cache=cache, tokenizer=tokenizer,
                     draft_model=draft_model, draft_cache=draft_cache,
+                    num_draft_tokens=ndt if draft_model is not None else None,
                     max_chunk_size=gcs,
                     cpu_cache_size=int(ccs * 1024 ** 3),
                     recurrent_cache_size=int(rcs * 1024 ** 3))
     TOK = tokenizer
+    # Without stop conditions generation never ends at <|im_end|> and always runs to max_tokens
+    # (upstream bug: every reply was exactly max_tokens long).
+    global STOP
+    STOP = [e for e in (getattr(config, "eos_token_id_list", None) or []) if e is not None]
+    try:
+        im_end = tokenizer.single_id("<|im_end|>")
+        if im_end is not None and im_end not in STOP:
+            STOP.append(im_end)
+    except Exception:
+        pass
+    STOP.append("<|im_end|>")
+    print("[api] stop conditions: %r" % (STOP,), flush=True)
     print("[api] generator ready (cpu tier: %s)"
           % (getattr(GEN, "cpu_page_cache", None) is not None), flush=True)
 
 
-def render_chat(messages):
-    """Prefer the model's own chat template; fall back to ChatML."""
+_TPL = None
+
+
+def _load_template():
+    """The model's own chat template, rendered the way HF transformers does it."""
+    global _TPL
+    if _TPL is not None or jinja2 is None:
+        return _TPL
+    src = None
     tpl_path = os.path.join(MODEL_DIR, "chat_template.jinja")
-    if JTemplate is not None and os.path.exists(tpl_path):
+    if os.path.exists(tpl_path):
+        src = open(tpl_path, encoding="utf-8").read()
+    else:
+        cfg = os.path.join(MODEL_DIR, "tokenizer_config.json")
+        if os.path.exists(cfg):
+            src = json.load(open(cfg, encoding="utf-8")).get("chat_template")
+    if not isinstance(src, str):
+        return None
+    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True,
+                                        extensions=["jinja2.ext.loopcontrols"])
+
+    def raise_exception(msg):
+        raise jinja2.exceptions.TemplateError(msg)
+
+    env.globals["raise_exception"] = raise_exception
+    env.filters.setdefault("tojson", lambda x, **k: json.dumps(x, ensure_ascii=False, **k))
+    _TPL = env.from_string(src)
+    return _TPL
+
+
+def render_chat(messages, tools=None, enable_thinking=True):
+    """Prefer the model's own chat template; fall back to Qwen-style ChatML."""
+    tpl = None
+    try:
+        tpl = _load_template()
+    except Exception as exc:
+        print("[api] chat template load failed (%r)" % exc, flush=True)
+    if tpl is not None:
         try:
-            src = open(tpl_path, encoding="utf-8").read()
-            out = JTemplate(src).render(messages=messages, add_generation_prompt=True)
+            kw = dict(messages=messages, add_generation_prompt=True,
+                      enable_thinking=enable_thinking)
+            if tools:
+                kw["tools"] = tools
+            out = tpl.render(**kw)
             if isinstance(out, str) and out.strip():
                 return out, "jinja"
         except Exception as exc:
@@ -124,26 +177,35 @@ def render_chat(messages):
         parts.append("<|im_start|>%s\n%s<|im_end|>\n"
                      % (m.get("role", "user"), m.get("content", "") or ""))
     parts.append("<|im_start|>assistant\n")
+    if not enable_thinking:
+        parts.append("<think>\n\n</think>\n\n")
     return "".join(parts), "chatml"
 
 
-def generate(prompt, max_tokens, temperature=None, top_p=None):
-    kw = {}
-    if temperature is not None:
-        kw["temperature"] = float(temperature)
-    if top_p is not None:
-        kw["top_p"] = float(top_p)
+def generate(prompt, max_tokens, temperature=None, top_p=None, top_k=None, min_p=None):
+    """One completion. Fixes vs upstream, all of which produced garbage or runaway output:
+
+    - encode_special_tokens=True: otherwise <|im_start|>/<|im_end|> are tokenised as plain
+      text and the model never sees a real chat template
+    - add_bos=False: Qwen has no BOS in its template
+    - stop_conditions: otherwise every reply runs to max_tokens
+    - a real ComboSampler: generate() swallows unknown kwargs, so temperature/top_p were ignored
+    - completion_only=True and use the returned completion string: last_results["text"] is
+      only the LAST streamed chunk (often a single character)
+    """
+    sampler = ComboSampler(
+        temperature=0.6 if temperature is None else float(temperature),
+        top_p=0.95 if top_p is None else float(top_p),
+        top_k=20 if top_k is None else int(top_k),
+        min_p=0.0 if min_p is None else float(min_p),
+    )
     with LOCK:
-        try:
-            out = GEN.generate(prompt, max_new_tokens=max_tokens, add_bos=True,
-                               return_last_results=True, **kw)
-        except TypeError:
-            # sampling kwargs are not part of this build's generate() signature
-            out = GEN.generate(prompt, max_new_tokens=max_tokens, add_bos=True,
-                               return_last_results=True)
-    r = out[-1] if isinstance(out, (list, tuple)) else out
-    if not isinstance(r, dict):
-        r = getattr(r, "__dict__", {"text": str(r)})
+        text, last = GEN.generate(prompt, max_new_tokens=max_tokens, sampler=sampler,
+                                  stop_conditions=STOP, add_bos=False,
+                                  encode_special_tokens=True, completion_only=True,
+                                  return_last_results=True)
+    r = dict(last) if isinstance(last, dict) else {}
+    r["text"] = text or ""
     return r
 
 
@@ -210,12 +272,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": {"message": "bad json: %r" % exc}})
 
         msgs = req.get("messages") or []
-        prompt, how = render_chat(msgs)
-        max_tokens = int(req.get("max_tokens") or 512)
+        ctk = req.get("chat_template_kwargs") or {}
+        thinking = ctk.get("enable_thinking", req.get("enable_thinking", True))
+        prompt, how = render_chat(msgs, tools=req.get("tools"), enable_thinking=bool(thinking))
+        max_tokens = int(req.get("max_tokens") or req.get("max_completion_tokens") or 4096)
         stream = bool(req.get("stream"))
 
         try:
-            r = generate(prompt, max_tokens, req.get("temperature"), req.get("top_p"))
+            r = generate(prompt, max_tokens, req.get("temperature"), req.get("top_p"),
+                         req.get("top_k"), req.get("min_p"))
         except Exception as exc:
             traceback.print_exc()
             return self._send(500, {"error": {"message": repr(exc)}})
@@ -225,15 +290,17 @@ class Handler(BaseHTTPRequestHandler):
         ct = r.get("cached_tokens") or 0
         nt = r.get("new_tokens") or 0
         hit = (100.0 * ct / pt) if pt else 0.0
-        print("[api] template=%s prompt=%d cached=%d (%.1f%% hit) new=%d"
-              % (how, pt, ct, hit, nt), flush=True)
+        reason = r.get("eos_reason") or "stop"
+        finish = "length" if reason == "max_new_tokens" else "stop"
+        print("[api] template=%s prompt=%d cached=%d (%.1f%% hit) new=%d end=%s"
+              % (how, pt, ct, hit, nt, reason), flush=True)
 
         cid = "chatcmpl-%d" % int(time.time() * 1000)
         if not stream:
             return self._send(200, {
                 "id": cid, "object": "chat.completion", "created": int(time.time()),
                 "model": req.get("model", "qwen3.8-flash-next-exl3"),
-                "choices": [{"index": 0, "finish_reason": "stop",
+                "choices": [{"index": 0, "finish_reason": finish,
                              "message": {"role": "assistant", "content": text}}],
                 "usage": {"prompt_tokens": pt, "completion_tokens": nt,
                           "total_tokens": pt + nt}})
@@ -254,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
                           "finish_reason": None}]},
             {"id": cid, "object": "chat.completion.chunk", "created": int(time.time()),
              "model": req.get("model", "qwen3.8-flash-next-exl3"),
-             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+             "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
         ):
             self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
         self.wfile.write(b"data: [DONE]\n\n")

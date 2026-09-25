@@ -230,6 +230,7 @@ class App:
             console.print("[red]error:[/] %s" % exc)
             return None
         raw = r["choices"][0]["message"]["content"] or ""
+        self.last_finish = r["choices"][0].get("finish_reason")
         self.messages.append({"role": "assistant", "content": raw})
         self.last_usage = r.get("usage", {})
         nt = self.last_usage.get("completion_tokens", 0)
@@ -251,6 +252,8 @@ class App:
             else:
                 console.print("[dim]  (thought for %d chars - /think to show)[/]" % len(thoughts))
         console.print(Markdown(answer or "_(empty)_", code_theme="monokai"))
+        if getattr(self, "last_finish", None) == "length":
+            console.print("[yellow]  (cut off at /max %d tokens - raise /max or ask to continue)[/]" % self.max_tokens)
         pt = self.last_usage.get("prompt_tokens", 0)
         console.print("[dim]  %d in / %d out · %.1fs · %.1f tok/s end-to-end[/]\n"
                       % (pt, nt, secs, nt / secs if secs else 0))
