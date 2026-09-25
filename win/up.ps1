@@ -109,8 +109,11 @@ while ((Get-Date) -lt $deadline) {
             }
             $served = $true
         } else {
-            $tail = ($b -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 2) -join ' | '
-            Say "  bootstrap running... $tail"
+            # tqdm output is full of carriage returns, which made this line overwrite itself
+            $prog = ($b -replace "`r", "`n" -split "`n" | Where-Object { $_ -like 'PROGRESS *' } | Select-Object -Last 1)
+            if (-not $prog) { $prog = 'PROGRESS (starting)' }
+            $mins = [int]((Get-Date) - $t0).TotalMinutes
+            Say ("  bootstrap running ({0} min) {1}" -f $mins, $prog.Substring(9))
             continue
         }
     }
