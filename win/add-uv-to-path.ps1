@@ -1,5 +1,5 @@
 # Find uv.exe and add its folder to the USER PATH permanently (no admin needed).
-#   powershell -ExecutionPolicy Bypass -File win\add-uv-to-path.ps1
+#   pwsh -File win\add-uv-to-path.ps1
 $ErrorActionPreference = 'Stop'
 
 $cands = @(

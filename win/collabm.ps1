@@ -1,6 +1,6 @@
 # collabm: open the interactive chat. If the endpoint is down, offer to (re)start the A100 first.
 #   collabm                    (after install-pwsh7.ps1 added it to your profile)
-#   powershell -ExecutionPolicy Bypass -File win\collabm.ps1 [--up] [--here] [-c] [-p "one-shot question"] [--show-thinking]
+#   pwsh -File win\collabm.ps1 [--up] [--here] [-c] [-p "one-shot question"] [--show-thinking]
 # Opens in ..\collabm-workspace (or $env:COLLABM_WORKSPACE / --here); conversations are saved there.
 $script:Tag = 'collabm'
 . (Join-Path $PSScriptRoot 'common.ps1')

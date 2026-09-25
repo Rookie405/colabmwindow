@@ -7,8 +7,9 @@ Claude-Code-style terminal (`collabm`) on your Windows machine.
 ```powershell
 git clone https://github.com/Rookie405/colabmwindow.git
 cd colabmwindow
-powershell -ExecutionPolicy Bypass -File win\setup.ps1          # uv + google-colab-cli + Google sign-in
-powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1  # PowerShell 7 + collabm shortcuts
+# PowerShell 7 is REQUIRED; this is the only step that runs in Windows PowerShell 5.1:
+powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1  # pwsh 7 + collabm shortcuts, then runs setup.ps1
+#   (setup.ps1 = uv + google-colab-cli + Google sign-in; re-run any time: pwsh -File win\setup.ps1)
 # new PowerShell 7 window:
 collabm          # starts the A100 if needed, then opens the chat
 collabm-down     # STOP THE VM when done (~7.52 CU/h while up)

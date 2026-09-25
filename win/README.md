@@ -1,5 +1,8 @@
 # collabosm on Windows
 
+**Requires PowerShell 7 (`pwsh`).** Every script refuses to run under Windows PowerShell 5.1,
+except `install-pwsh7.ps1`, which is the bootstrap that installs pwsh 7.
+
 Native PowerShell entry points for the collabosm pipeline (Qwen3.8-Flash-Next on one Colab
 A100-80GB High-RAM, exposed as an OpenAI-compatible endpoint). No WSL / Git Bash needed; the
 bash scripts in `scripts/` still run *on the Colab VM*.
@@ -8,10 +11,11 @@ bash scripts in `scripts/` still run *on the Colab VM*.
 
 ```powershell
 cd <repo>                      # e.g. C:\work\colabmwindow
-powershell -ExecutionPolicy Bypass -File win\setup.ps1   # once: uv, google-colab-cli, Google sign-in, CU balance
-powershell -ExecutionPolicy Bypass -File win\up.ps1      # box -> bootstrap -> serve  (~15-20 min cold)
-powershell -ExecutionPolicy Bypass -File win\test.ps1    # health + one chat completion
-powershell -ExecutionPolicy Bypass -File win\down.ps1    # STOP THE VM when done
+powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1   # once, in 5.1: installs pwsh 7, then runs setup.ps1
+pwsh -File win\setup.ps1   # (re-run) uv, google-colab-cli, Google sign-in, CU balance
+pwsh -File win\up.ps1      # box -> bootstrap -> serve  (~15-20 min cold)
+pwsh -File win\test.ps1    # health + one chat completion
+pwsh -File win\down.ps1    # STOP THE VM when done
 ```
 
 `up.ps1` saves `base_url` / `api_key` to `.local\endpoint.json` (gitignored). Point any

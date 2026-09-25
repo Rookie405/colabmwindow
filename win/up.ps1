@@ -1,7 +1,7 @@
 # collabosm up (Windows): restore/create the A100-80GB High-RAM box, bootstrap, serve, save endpoint.
 #
-#   powershell -ExecutionPolicy Bypass -File win\up.ps1
-#   powershell -ExecutionPolicy Bypass -File win\up.ps1 -CacheSize 524288 -CpuCacheGB 8
+#   pwsh -File win\up.ps1
+#   pwsh -File win\up.ps1 -CacheSize 524288 -CpuCacheGB 8
 #
 # Same order as scripts/up.sh -- the expensive steps come last:
 #   1. restore/verify the box (a 40 GB box is rejected + stopped in ~1 min, before any download)
@@ -136,8 +136,8 @@ while ((Get-Date) -lt $deadline) {
         Write-Host "  model    : $($rec.model)"
         Write-Host "  saved to : .local\endpoint.json"
         Write-Host ""
-        Write-Host "  smoke test : powershell -ExecutionPolicy Bypass -File win\test.ps1"
-        Write-Host "  WHEN DONE  : powershell -ExecutionPolicy Bypass -File win\down.ps1   (~7.52 CU/h while up)"
+        Write-Host "  smoke test : pwsh -File win\test.ps1"
+        Write-Host "  WHEN DONE  : pwsh -File win\down.ps1   (~7.52 CU/h while up)"
         exit 0
     }
 }

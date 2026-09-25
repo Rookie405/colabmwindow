@@ -1,5 +1,5 @@
 # One-time setup on Windows: uv + google-colab-cli + Google sign-in + CU balance check.
-#   powershell -ExecutionPolicy Bypass -File win\setup.ps1
+#   pwsh -File win\setup.ps1
 $script:Tag = 'setup'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
@@ -37,5 +37,5 @@ Budget reference (from docs/RUNBOOK.md):
   A100 40GB standard  ~5.37 CU/h   <- CANNOT load this model
   hours = CU balance / 7.52
 
-Next:  powershell -ExecutionPolicy Bypass -File win\up.ps1
+Next:  pwsh -File win\up.ps1
 "@

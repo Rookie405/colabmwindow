@@ -1,6 +1,15 @@
 # Shared helpers for the Windows (PowerShell) entry points of collabosm.
 # Dot-sourced by setup.ps1 / up.ps1 / down.ps1 / status.ps1 / test.ps1.
-# Compatible with Windows PowerShell 5.1 and PowerShell 7+.
+# Requires PowerShell 7+. Windows PowerShell 5.1 is refused on purpose: its encoding defaults,
+# native-command stderr handling and module set differ enough that results are not reproducible.
+
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host ''
+    Write-Host "collabosm needs PowerShell 7 (pwsh). This is Windows PowerShell $($PSVersionTable.PSVersion)." -ForegroundColor Red
+    Write-Host '  1. install it once:  powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1'
+    Write-Host '  2. then use pwsh:    pwsh -File win\<script>.ps1   (or the collabm* commands in a PowerShell 7 window)'
+    exit 1
+}
 
 $ErrorActionPreference = 'Stop'
 $script:Root       = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -33,7 +42,7 @@ function Get-ColabExe {
     if ($cmd) { return $cmd.Source }
     $cand = Join-Path $env:USERPROFILE '.local\bin\colab.exe'
     if (Test-Path $cand) { return $cand }
-    throw "colab CLI not found. Run: powershell -ExecutionPolicy Bypass -File win\setup.ps1"
+    throw "colab CLI not found. Run: pwsh -File win\setup.ps1"
 }
 
 function Get-UvExe {

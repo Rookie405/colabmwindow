@@ -1,5 +1,5 @@
 # Smoke-test the endpoint saved by up.ps1 (health, models, one chat completion).
-#   powershell -ExecutionPolicy Bypass -File win\test.ps1 [-Prompt "..."] [-MaxTokens 256]
+#   pwsh -File win\test.ps1 [-Prompt "..."] [-MaxTokens 256]
 param([string]$Prompt = 'In two sentences: what is a Gated-DeltaNet layer?', [int]$MaxTokens = 256)
 $script:Tag = 'test'
 . (Join-Path $PSScriptRoot 'common.ps1')

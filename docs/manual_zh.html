@@ -71,19 +71,25 @@ th{color:var(--muted);font-weight:600}
 <h2 id="prereq">2. 前提条件</h2>
 <ul>
 <li>Colab Pro / Pro+ 账户，能分配 <b>A100 High-RAM</b>（80GB 显存）。40GB 的标准 A100 <b>无法加载</b>此模型。</li>
-<li>Windows 10/11，自带的 PowerShell 5.1 即可，<b>不需要</b> WSL 或 Git Bash。</li>
+<li>Windows 10/11，<b>必须使用 PowerShell 7（pwsh）</b>。Windows 自带的 PowerShell 5.1 在编码、外部命令错误处理等方面行为不同，别人的机器上无法保证复现，所以所有脚本都会拒绝在 5.1 下运行。唯一例外是 <code>win\install-pwsh7.ps1</code>，它就是用来安装 PowerShell 7 的。</li>
+<li><b>不需要</b> WSL 或 Git Bash。</li>
 <li>浏览器可以登录你的 Google 账户（首次授权用）。</li>
 </ul>
 
 <h2 id="setup">3. 一次性安装</h2>
+<p>第 ① 步在 Windows 自带的 PowerShell（5.1）里运行，之后全部在 PowerShell 7 里运行。</p>
 <pre><code>cd &lt;repo&gt;            # 本仓库的位置，例如 C:\work\colabmwindow
-powershell -ExecutionPolicy Bypass -File win\setup.ps1</code></pre>
-<p>它会依次：安装 <code>uv</code> → 安装 <code>google-colab-cli</code> → 触发 Google 登录 → 显示你的 CU 余额（<code>colab usage</code>）。</p>
+# ① 安装 PowerShell 7 + collabm 快捷命令，结束时会询问是否立即运行 ②
+powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1
+# ② 以后需要重新配置时，在 PowerShell 7 里单独运行
+pwsh -File win\setup.ps1</code></pre>
+<p><code>setup.ps1</code> 会依次：安装 <code>uv</code> → 安装 <code>google-colab-cli</code> 并把 jupyter-kernel-client 固定为 0.9.0 → 触发 Google 登录 → 显示你的 CU 余额（<code>colab usage</code>）。</p>
+<p>装完之后打开<b>新的 PowerShell 7 窗口</b>（Windows Terminal 里选 “PowerShell”，不是 “Windows PowerShell”）。用 <code>$PSVersionTable.PSVersion</code> 确认版本是 7.x。</p>
 <div class="note"><b>首次授权：</b>终端会打印一个 Google 授权链接。在浏览器打开、同意后，页面会显示一串授权码，把它<b>完整</b>粘贴回终端并回车。</div>
 
 <h2 id="daily">4. 日常使用流程</h2>
 <h3>① 启动</h3>
-<pre><code>powershell -ExecutionPolicy Bypass -File win\up.ps1</code></pre>
+<pre><code>pwsh -File win\up.ps1</code></pre>
 <p>成功后会输出：</p>
 <pre><code>[up ..] READY in 14 min
   base_url : https://xxxx.trycloudflare.com/v1
@@ -93,15 +99,15 @@ powershell -ExecutionPolicy Bypass -File win\setup.ps1</code></pre>
 <p>如果已经有一台在跑的机器，<code>up.ps1</code> 会自动接上它，不会再开新机器。脚本可以放心重跑，已完成的步骤会被跳过。</p>
 
 <h3>② 测试</h3>
-<pre><code>powershell -ExecutionPolicy Bypass -File win\test.ps1
-powershell -ExecutionPolicy Bypass -File win\test.ps1 -Prompt "用中文介绍一下你自己" -MaxTokens 300</code></pre>
+<pre><code>pwsh -File win\test.ps1
+pwsh -File win\test.ps1 -Prompt "用中文介绍一下你自己" -MaxTokens 300</code></pre>
 
 <h3>③ 查看状态</h3>
-<pre><code>powershell -ExecutionPolicy Bypass -File win\status.ps1</code></pre>
+<pre><code>pwsh -File win\status.ps1</code></pre>
 <p>会显示：服务器端所有会话（即正在计费的机器）、VM 当前阶段、健康检查、GPU 显存占用、隧道地址。</p>
 
 <h3>④ 关机</h3>
-<pre><code>powershell -ExecutionPolicy Bypass -File win\down.ps1</code></pre>
+<pre><code>pwsh -File win\down.ps1</code></pre>
 <p>执行后看输出里的 “remaining server-side assignments”，如果还列着机器，说明<b>仍在计费</b>。</p>
 
 <h2 id="params">5. 启动参数</h2>
@@ -118,14 +124,12 @@ powershell -ExecutionPolicy Bypass -File win\test.ps1 -Prompt "用中文介绍�
 <tr><td><code>-KeepAlive</code></td><td>关</td><td>空闲时也保持机器，<b>会持续耗 CU</b>，不建议</td></tr>
 </table>
 <p>推荐的长上下文 / Agent 配置：</p>
-<pre><code>powershell -ExecutionPolicy Bypass -File win\up.ps1 -CacheSize 524288 -CpuCacheGB 8 -RecurrentCacheGB 24 -Gcs 8192</code></pre>
+<pre><code>pwsh -File win\up.ps1 -CacheSize 524288 -CpuCacheGB 8 -RecurrentCacheGB 24 -Gcs 8192</code></pre>
 <div class="note"><code>-CacheSize</code>、<code>-CacheQuant</code>、<code>-Ndt</code>、<code>-CpuCacheGB</code> 都是加载时参数，改了要重新加载模型（2–6 分钟）。尽量一次想好再启动。</div>
 
 <h2 id="collabm">6. collabm 交互终端</h2>
 <p>类似 Claude Code 的命令行对话界面：在 PowerShell 7 里输入 <code>collabm</code>，会自动进入工程文件夹、连上模型，直接用自然语言对话，不需要手写 JSON。</p>
-<h3>安装（一次）</h3>
-<pre><code>powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1</code></pre>
-<p>它会安装 PowerShell 7（winget），并在 PowerShell 7 的 profile 里加上快捷命令。之后打开<b>新的 PowerShell 7 窗口</b>即可使用。建议在 Windows Terminal 设置里把默认配置文件改成 PowerShell 7。</p>
+<p>快捷命令已经在第 3 节的 <code>install-pwsh7.ps1</code> 里装好了。建议在 Windows Terminal 设置里把默认配置文件改成 PowerShell 7。</p>
 
 <h3>工程文件夹</h3>
 <p>默认工作区是仓库<b>旁边</b>的 <code>collabm-workspace</code> 文件夹（例：仓库在 <code>C:\work\colabmwindow</code>，工作区就是 <code>C:\work\collabm-workspace</code>）。第一次运行时会从 <code>workspace-template\</code> 自动创建。<code>collabm</code> 启动后会自动切换到这里。</p>
@@ -211,6 +215,7 @@ print(r.choices[0].message.content)</code></pre>
 <h2 id="trouble">9. 故障排查</h2>
 <table>
 <tr><th>现象</th><th>原因 / 处理</th></tr>
+<tr><td><code>collabosm needs PowerShell 7 (pwsh)</code></td><td>用了 Windows 自带的 PowerShell 5.1。先运行 <code>install-pwsh7.ps1</code>，然后在 PowerShell 7 窗口里用 <code>pwsh</code> 或 <code>collabm*</code> 命令。</td></tr>
 <tr><td><code>ModuleNotFoundError: No module named 'termios'</code></td><td>colab CLI 在 Windows 上的已知问题。<code>win\*.ps1</code> 已自动加载 <code>win\compat</code> 里的替身模块。手动使用 colab 前需先设置 <code>PYTHONPATH</code>（见第 10 节）。</td></tr>
 <tr><td><code>AttributeError: module 'jupyter_kernel_client' has no attribute 'JupyterSubprotocol'</code></td><td>colab CLI 0.7.2 自带的 jupyter-kernel-client 0.8 版本不对。<code>setup.ps1</code> / <code>up.ps1</code> 会自动换成 0.9.0。不要运行 <code>uv tool upgrade google-colab-cli</code>，升级后会被还原；万一升级了，重跑 <code>setup.ps1</code> 即可。</td></tr>
 <tr><td><code>probe x/6 did not answer yet</code></td><td>新机器内核还在启动时会出现 1–2 次，属于正常。每次重试都会打印 <code>last output</code>，一直失败时根据它判断：是编码错误、认证过期，还是 VM 已被回收。</td></tr>

@@ -17,6 +17,14 @@ if ($pwsh) {
     exit 1
 }
 
+# locate pwsh.exe even if this session's PATH predates the install
+$pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+if (-not $pwshExe) { $pwshExe = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe' }
+if (-not (Test-Path $pwshExe)) { throw "pwsh.exe not found after install; open a new terminal and re-run" }
+
+# scripts from a ZIP download carry a 'downloaded from internet' mark that pwsh's RemoteSigned refuses
+Get-ChildItem -Path $root -Recurse -Include *.ps1 | Unblock-File -ErrorAction SilentlyContinue
+
 # 2. profile block (PowerShell 7 reads Documents\PowerShell\Microsoft.PowerShell_profile.ps1)
 $docs = [Environment]::GetFolderPath('MyDocuments')   # follows OneDrive redirection
 if (-not $docs) { $docs = Join-Path $HOME 'Documents' }
@@ -55,3 +63,7 @@ Done. Open a NEW 'PowerShell 7' window (Windows Terminal: dropdown -> PowerShell
   collabm-down       STOP THE VM (billing)
 Tip: in Windows Terminal settings, set 'Default profile' to PowerShell (7).
 "@
+
+# 3. one-time setup (uv, google-colab-cli, Google sign-in), run under PowerShell 7
+$ans = Read-Host 'Run win\setup.ps1 in PowerShell 7 now? [Y/n]'
+if ($ans -notmatch '^(n|no)$') { & $pwshExe -NoProfile -File (Join-Path $PSScriptRoot 'setup.ps1') }
