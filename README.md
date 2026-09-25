@@ -1,3 +1,32 @@
+# colabmwindow
+
+Windows / PowerShell 7 edition of [architectds/collabosm](https://github.com/architectds/collabosm):
+run **Qwen3.8-Flash-Next** on one rented Colab A100-80GB High-RAM and talk to it from a
+Claude-Code-style terminal (`collabm`) on your Windows machine.
+
+```powershell
+git clone https://github.com/Rookie405/colabmwindow.git
+cd colabmwindow
+powershell -ExecutionPolicy Bypass -File win\setup.ps1          # uv + google-colab-cli + Google sign-in
+powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1  # PowerShell 7 + collabm shortcuts
+# new PowerShell 7 window:
+collabm          # starts the A100 if needed, then opens the chat
+collabm-down     # STOP THE VM when done (~7.52 CU/h while up)
+```
+
+- Windows guide and changes vs upstream: [`win/README.md`](win/README.md)
+- Chinese manual (中文手册): [`docs/manual_zh.html`](docs/manual_zh.html)
+- Chat client: [`client/collabm.py`](client/collabm.py); default workspace is created from
+  [`workspace-template/`](workspace-template/) next to the repo as `collabm-workspace/`.
+
+Fixes over upstream that apply on every OS: `up.sh` now uploads `api_server.py` and launches
+`serve.sh`; `status.py` no longer crashes on `%{http_code}`; the API key is actually enforced;
+`jupyter-kernel-client` must be 0.9.0 for google-colab-cli 0.7.2.
+
+---
+
+*The upstream README follows.*
+
 # collabosm
 
 Run **Qwen3.8-Flash-Next** (125B-A6B MoE, hybrid Gated-DeltaNet + full attention, 262144 native

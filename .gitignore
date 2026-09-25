@@ -4,3 +4,5 @@ __pycache__/
 bin/url.txt
 .env
 *.log
+# local Windows state (endpoint URL, API key, temp uploads)
+.local/

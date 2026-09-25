@@ -44,7 +44,8 @@ fi
 
 # ------------------------------------------------------- 2. push the toolkit
 say "uploading the toolkit"
-for f in bootstrap.sh serve.sh status.py probe_gpu.py; do
+# api_server.py is required by serve.sh (upstream forgot to upload it)
+for f in bootstrap.sh serve.sh api_server.py status.py probe_gpu.py bootstrap_ok.py; do
   timeout 180 $COLAB upload -s "$SESSION" "$SCRIPT_DIR/$f" "/content/$f" >/dev/null 2>&1 \
     && say "  ok   $f" || say "  FAIL $f"
 done
@@ -70,10 +71,26 @@ print(subprocess.run("nohup bash -lc 'source /content/collabosm_env.sh && bash /
 PY
 timeout 200 $COLAB exec -s "$SESSION" --timeout 150 -f /tmp/start_bootstrap.py 2>&1 | grep -o 'BOOTSTRAPPING' | head -1
 
+# serve.sh is launched once bootstrap reports OK (upstream never launched it)
+cat > /tmp/start_serve.py <<'PY'
+import subprocess
+print(subprocess.run("nohup bash -lc 'bash /content/serve.sh' > /content/serve_launch.log 2>&1 & echo SERVING",
+                     shell=True, capture_output=True, text=True).stdout)
+PY
+
 say "waiting up to ${WAIT_MIN} min for the endpoint"
 deadline=$(( $(date +%s) + WAIT_MIN * 60 ))
+served=0
 while [ "$(date +%s)" -lt "$deadline" ]; do
   sleep 45
+  if [ "$served" = 0 ]; then
+    boot=$($COLAB exec -s "$SESSION" --timeout 60 -f "$SCRIPT_DIR/bootstrap_ok.py" 2>/dev/null)
+    if echo "$boot" | grep -q "bootstrap_ok"; then
+      say "bootstrap OK -> launching serve.sh (model load ~2-6 min)"
+      timeout 200 $COLAB exec -s "$SESSION" --timeout 150 -f /tmp/start_serve.py 2>&1 | grep -o SERVING | head -1
+      served=1
+    fi
+  fi
   out=$($COLAB exec -s "$SESSION" --timeout 60 -f "$SCRIPT_DIR/status.py" 2>/dev/null)
   echo "$out" | sed 's/^/  /'
   if echo "$out" | grep -q "health:         200"; then

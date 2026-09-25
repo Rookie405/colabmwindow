@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>collabosm 使用手册</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#5d6570;--card:#ffffff;--line:#e3e0d8;--accent:#1f6f5c;--warn:#a1461b;--warnbg:#fdf1ea;--code:#f3f1ec}
+@media (prefers-color-scheme:dark){:root{--bg:#15171a;--fg:#e6e6e3;--muted:#9aa1a9;--card:#1d2024;--line:#2e3238;--accent:#5cc3a6;--warn:#f0a070;--warnbg:#2a1f19;--code:#23272c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:32px 16px 80px}
+h1{font-size:30px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 24px}
+h2{font-size:21px;margin:44px 0 12px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 8px}
+a{color:var(--accent)}
+nav{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 18px;margin:20px 0}
+nav ol{margin:0;padding-left:20px;columns:2;column-gap:28px}
+@media (max-width:560px){nav ol{columns:1}}
+code{font-family:Consolas,"Cascadia Mono",monospace;font-size:.9em;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;line-height:1.55}
+pre code{background:none;padding:0}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:15px;display:block;overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.warn{background:var(--warnbg);border-left:4px solid var(--warn);padding:10px 14px;border-radius:6px;margin:14px 0}
+.note{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);padding:10px 14px;border-radius:6px;margin:14px 0}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}
+.flow span{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px}
+.flow b{color:var(--muted);font-weight:400}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>collabosm 使用手册</h1>
+<p class="sub">在一台 Colab A100-80GB High-RAM 上运行 Qwen3.8-Flash-Next（125B-A6B MoE），并通过 OpenAI 兼容接口调用。Windows 版 · 基于 architectds/collabosm</p>
+
+<nav><ol>
+<li><a href="#overview">整体架构</a></li>
+<li><a href="#prereq">前提条件</a></li>
+<li><a href="#setup">一次性安装</a></li>
+<li><a href="#daily">日常使用流程</a></li>
+<li><a href="#params">启动参数</a></li>
+<li><a href="#collabm">collabm 交互终端</a></li>
+<li><a href="#client">客户端接入</a></li>
+<li><a href="#budget">费用与额度</a></li>
+<li><a href="#trouble">故障排查</a></li>
+<li><a href="#manual">手动操作 VM</a></li>
+<li><a href="#files">文件说明</a></li>
+</ol></nav>
+
+<div class="warn"><b>最重要的一条：</b>用完一定要运行 <code>win\down.ps1</code> 关机。A100 High-RAM 约 7.52 CU/小时，只要没关机就一直在计费，不管你有没有在用。</div>
+
+<h2 id="overview">1. 整体架构</h2>
+<div class="flow">
+<span>你的 Windows 电脑<br><small>win\*.ps1</small></span><b>→ colab CLI →</b>
+<span>Colab VM<br><small>A100 80GB / 167GB RAM</small></span><b>→</b>
+<span>ExLlamaV3 + api_server.py<br><small>:8090</small></span><b>→ cloudflared →</b>
+<span>公网 https://xxx.trycloudflare.com/v1</span>
+</div>
+<p>本地脚本只负责「指挥」：申请机器、上传脚本、远程执行。所有模型相关的工作（下载约 100 GiB 权重、加载、推理）都在 Colab VM 上完成。服务通过 cloudflared 临时隧道暴露为公网地址，并用 API key 保护。</p>
+<table>
+<tr><th>阶段</th><th>在哪里执行</th><th>耗时（参考）</th></tr>
+<tr><td>申请 / 恢复机器并验证显存</td><td>本地 <code>restore.py</code></td><td>1–3 分钟</td></tr>
+<tr><td>安装 ExLlamaV3（预编译 wheel）</td><td>VM <code>bootstrap.sh</code></td><td>约 20 秒</td></tr>
+<tr><td>下载模型权重（固定版本）</td><td>VM <code>bootstrap.sh</code></td><td>约 5 分钟</td></tr>
+<tr><td>加载模型 + 启动 API + 隧道</td><td>VM <code>serve.sh</code></td><td>2–6 分钟</td></tr>
+</table>
+
+<h2 id="prereq">2. 前提条件</h2>
+<ul>
+<li>Colab Pro / Pro+ 账户，能分配 <b>A100 High-RAM</b>（80GB 显存）。40GB 的标准 A100 <b>无法加载</b>此模型。</li>
+<li>Windows 10/11，自带的 PowerShell 5.1 即可，<b>不需要</b> WSL 或 Git Bash。</li>
+<li>浏览器可以登录你的 Google 账户（首次授权用）。</li>
+</ul>
+
+<h2 id="setup">3. 一次性安装</h2>
+<pre><code>cd &lt;repo&gt;            # 本仓库的位置，例如 C:\work\colabmwindow
+powershell -ExecutionPolicy Bypass -File win\setup.ps1</code></pre>
+<p>它会依次：安装 <code>uv</code> → 安装 <code>google-colab-cli</code> → 触发 Google 登录 → 显示你的 CU 余额（<code>colab usage</code>）。</p>
+<div class="note"><b>首次授权：</b>终端会打印一个 Google 授权链接。在浏览器打开、同意后，页面会显示一串授权码，把它<b>完整</b>粘贴回终端并回车。</div>
+
+<h2 id="daily">4. 日常使用流程</h2>
+<h3>① 启动</h3>
+<pre><code>powershell -ExecutionPolicy Bypass -File win\up.ps1</code></pre>
+<p>成功后会输出：</p>
+<pre><code>[up ..] READY in 14 min
+  base_url : https://xxxx.trycloudflare.com/v1
+  api_key  : sk-collabosm-xxxxxxxxxxxxxxxxxxxx
+  model    : qwen3.8-flash-next-exl3
+  saved to : .local\endpoint.json</code></pre>
+<p>如果已经有一台在跑的机器，<code>up.ps1</code> 会自动接上它，不会再开新机器。脚本可以放心重跑，已完成的步骤会被跳过。</p>
+
+<h3>② 测试</h3>
+<pre><code>powershell -ExecutionPolicy Bypass -File win\test.ps1
+powershell -ExecutionPolicy Bypass -File win\test.ps1 -Prompt "用中文介绍一下你自己" -MaxTokens 300</code></pre>
+
+<h3>③ 查看状态</h3>
+<pre><code>powershell -ExecutionPolicy Bypass -File win\status.ps1</code></pre>
+<p>会显示：服务器端所有会话（即正在计费的机器）、VM 当前阶段、健康检查、GPU 显存占用、隧道地址。</p>
+
+<h3>④ 关机</h3>
+<pre><code>powershell -ExecutionPolicy Bypass -File win\down.ps1</code></pre>
+<p>执行后看输出里的 “remaining server-side assignments”，如果还列着机器，说明<b>仍在计费</b>。</p>
+
+<h2 id="params">5. 启动参数</h2>
+<table>
+<tr><th>参数</th><th>默认</th><th>说明</th></tr>
+<tr><td><code>-Session</code></td><td>collabosm</td><td>本地会话名</td></tr>
+<tr><td><code>-CacheSize</code></td><td>262144</td><td>KV 缓存总 token 数（所有并发请求共享，需为 256 的倍数）。80GB 卡上限约 90 万–100 万</td></tr>
+<tr><td><code>-CacheQuant</code></td><td>4</td><td>KV 量化位数（2–8）</td></tr>
+<tr><td><code>-CpuCacheGB</code></td><td>0</td><td>第二级 KV 缓存（锁页内存）。设 8 时，被挤出显存的对话恢复只需 0.58 秒，否则要重新 prefill 约 10 秒</td></tr>
+<tr><td><code>-RecurrentCacheGB</code></td><td>4</td><td>Gated-DeltaNet 检查点存储。默认只能覆盖约 7 万 token 的可恢复前缀；长对话建议 20–30</td></tr>
+<tr><td><code>-Ndt</code></td><td>4</td><td>MTP 投机解码深度</td></tr>
+<tr><td><code>-Gcs</code></td><td>4096</td><td>prefill 分块大小，8192 实测最快（首次会有一次 autotune，第二次才是真实速度）</td></tr>
+<tr><td><code>-WaitMin</code></td><td>50</td><td>最长等待分钟数</td></tr>
+<tr><td><code>-KeepAlive</code></td><td>关</td><td>空闲时也保持机器，<b>会持续耗 CU</b>，不建议</td></tr>
+</table>
+<p>推荐的长上下文 / Agent 配置：</p>
+<pre><code>powershell -ExecutionPolicy Bypass -File win\up.ps1 -CacheSize 524288 -CpuCacheGB 8 -RecurrentCacheGB 24 -Gcs 8192</code></pre>
+<div class="note"><code>-CacheSize</code>、<code>-CacheQuant</code>、<code>-Ndt</code>、<code>-CpuCacheGB</code> 都是加载时参数，改了要重新加载模型（2–6 分钟）。尽量一次想好再启动。</div>
+
+<h2 id="collabm">6. collabm 交互终端</h2>
+<p>类似 Claude Code 的命令行对话界面：在 PowerShell 7 里输入 <code>collabm</code>，会自动进入工程文件夹、连上模型，直接用自然语言对话，不需要手写 JSON。</p>
+<h3>安装（一次）</h3>
+<pre><code>powershell -ExecutionPolicy Bypass -File win\install-pwsh7.ps1</code></pre>
+<p>它会安装 PowerShell 7（winget），并在 PowerShell 7 的 profile 里加上快捷命令。之后打开<b>新的 PowerShell 7 窗口</b>即可使用。建议在 Windows Terminal 设置里把默认配置文件改成 PowerShell 7。</p>
+
+<h3>工程文件夹</h3>
+<p>默认工作区是仓库<b>旁边</b>的 <code>collabm-workspace</code> 文件夹（例：仓库在 <code>C:\work\colabmwindow</code>，工作区就是 <code>C:\work\collabm-workspace</code>）。第一次运行时会从 <code>workspace-template\</code> 自动创建。<code>collabm</code> 启动后会自动切换到这里。</p>
+<table>
+<tr><th>路径</th><th>作用</th></tr>
+<tr><td><code>COLLABM.md</code></td><td>工程级指令，每次对话都会自动加进系统提示词（类似 CLAUDE.md）。可以直接编辑，也可以在对话里用 <code>/memory 内容</code> 追加</td></tr>
+<tr><td><code>conversations\</code></td><td>每次对话保存两个文件：<code>时间戳.md</code> 用来阅读，<code>时间戳.json</code> 用来之后接着聊</td></tr>
+<tr><td><code>.collabm\history.txt</code></td><td>输入历史（按上方向键调出）</td></tr>
+</table>
+<p>想讨论的文件放在工作区里，对话中用 <code>@路径</code> 引用；<code>/run</code> 也在这个文件夹里执行。想换别的文件夹：用 <code>collabm --here</code> 以当前目录为工作区，或者设置环境变量 <code>$env:COLLABM_WORKSPACE</code>。</p>
+
+<h3>启动命令</h3>
+<table>
+<tr><th>命令</th><th>作用</th></tr>
+<tr><td><code>collabm</code></td><td>进入对话；服务没开时会询问是否先启动 A100</td></tr>
+<tr><td><code>collabm --up</code></td><td>服务没开时不询问，直接启动</td></tr>
+<tr><td><code>collabm -c</code></td><td>接着上一次对话继续</td></tr>
+<tr><td><code>collabm --here</code></td><td>以当前目录作为工作区</td></tr>
+<tr><td><code>collabm -p "问题"</code></td><td>单次提问，直接输出答案</td></tr>
+<tr><td><code>collabm-up / -status / -test / -down</code></td><td>启动 / 状态 / 测试 / <b>关机</b></td></tr>
+</table>
+
+<h3>对话中的操作</h3>
+<table>
+<tr><th>输入</th><th>作用</th></tr>
+<tr><td>Enter / Alt+Enter</td><td>发送 / 换行</td></tr>
+<tr><td><code>@路径</code></td><td>把本地文件内容附进这条消息，例：<code>帮我审查 @src\main.py</code></td></tr>
+<tr><td><code>/run 命令</code></td><td>在本地执行命令，显示输出，然后可以让模型分析</td></tr>
+<tr><td><code>/clear</code></td><td>开始新对话（生成新的记录文件）</td></tr>
+<tr><td><code>/resume</code> [n]</td><td>列出历史对话 / 载入第 n 个</td></tr>
+<tr><td><code>/memory</code> [内容]</td><td>查看 COLLABM.md / 追加一条规则</td></tr>
+<tr><td><code>/think</code></td><td>显示或隐藏模型的思考过程（&lt;think&gt;）</td></tr>
+<tr><td><code>/retry /undo</code></td><td>重新生成 / 撤销上一轮</td></tr>
+<tr><td><code>/system /temp /max</code></td><td>系统提示词 / 温度 / 最大输出长度</td></tr>
+<tr><td><code>/cd /save /status /exit</code></td><td>切换目录 / 查看或另存对话记录 / 状态 / 退出（Ctrl+D 也可以退出）</td></tr>
+</table>
+
+<h3>启动要等多久</h3>
+<table>
+<tr><th>情况</th><th>大约耗时</th></tr>
+<tr><td>全新机器（下载权重约 5 分钟 + 加载约 6 分半）</td><td>12–15 分钟</td></tr>
+<tr><td>机器还在、服务还在跑</td><td>1–3 分钟（直接接上）</td></tr>
+<tr><td>机器还在、只是重新加载模型</td><td>约 2–3 分钟</td></tr>
+</table>
+<p>加载阶段会一直显示 <code>stage=loading</code>，属于正常。超过 10 分钟还没变，就查看 <code>serve.log</code>（见第 10 节）。开一次机器就集中用完，是最省时间也最省 CU 的用法。</p>
+
+<div class="note">目前回复是一次性整段显示的，不会逐字输出（服务端还不支持流式）。另外 cloudflared 临时隧道单个回复超过约 100 秒会被切断，所以 <code>/max</code> 不要设得太大：4096 按约 90 tok/s 算大约 45 秒。退出 collabm <b>不会</b>关掉 A100，要用 <code>collabm-down</code> 关机。</div>
+
+<h2 id="client">7. 客户端接入</h2>
+<p>接口兼容 OpenAI：<code>GET /v1/models</code>、<code>POST /v1/chat/completions</code>（支持 stream，但目前是一次性返回全部内容，不是逐字输出）。认证方式为 <code>Authorization: Bearer &lt;api_key&gt;</code>。</p>
+<h3>环境变量</h3>
+<pre><code>$e = Get-Content .local\endpoint.json | ConvertFrom-Json
+$env:OPENAI_BASE_URL = $e.base_url
+$env:OPENAI_API_KEY  = $e.key</code></pre>
+<h3>Python</h3>
+<pre><code>from openai import OpenAI
+client = OpenAI(base_url="https://xxxx.trycloudflare.com/v1", api_key="sk-collabosm-...")
+r = client.chat.completions.create(
+    model="qwen3.8-flash-next-exl3",
+    messages=[{"role": "user", "content": "你好"}],
+    max_tokens=512)
+print(r.choices[0].message.content)</code></pre>
+<h3>curl</h3>
+<pre><code>curl https://xxxx.trycloudflare.com/v1/chat/completions ^
+  -H "Authorization: Bearer sk-collabosm-..." -H "Content-Type: application/json" ^
+  -d "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":64}"</code></pre>
+<div class="note">隧道地址每次启动都会变。请求是串行处理的（同一时间只跑一个），这是引擎本身的设计。</div>
+
+<h2 id="budget">8. 费用与额度</h2>
+<table>
+<tr><th>机型</th><th>显存 / 内存</th><th>CU/小时</th><th>能否运行</th></tr>
+<tr><td>A100 High-RAM</td><td>79.3 GiB / 167 GB</td><td>约 7.52</td><td>✅ 可以</td></tr>
+<tr><td>A100 标准</td><td>约 39 GiB / 83 GB</td><td>约 5.37</td><td>❌ 不行</td></tr>
+</table>
+<p>可用小时 = CU 余额 ÷ 7.52。例：500 CU ≈ 66 小时；标称的「约 90 小时」通常是按 40GB 标准版的单价算的。</p>
+<ul>
+<li>每次全新开机都要重新下载约 100 GiB 权重并加载模型（约 10–15 分钟），这段时间也在计费。<b>一次开机集中干完活</b>最划算。</li>
+<li>如果分到 40GB 机器，<code>restore.py</code> 会立刻关掉（约 0.13 CU），直接重跑 <code>up.ps1</code> 即可。</li>
+<li>Colab 大约 90 分钟无操作会自动回收机器；持续推理算作活动。</li>
+<li>随时用 <code>colab usage</code> 查看余额（见第 10 节的环境变量设置）。</li>
+</ul>
+
+<h2 id="trouble">9. 故障排查</h2>
+<table>
+<tr><th>现象</th><th>原因 / 处理</th></tr>
+<tr><td><code>ModuleNotFoundError: No module named 'termios'</code></td><td>colab CLI 在 Windows 上的已知问题。<code>win\*.ps1</code> 已自动加载 <code>win\compat</code> 里的替身模块。手动使用 colab 前需先设置 <code>PYTHONPATH</code>（见第 10 节）。</td></tr>
+<tr><td><code>AttributeError: module 'jupyter_kernel_client' has no attribute 'JupyterSubprotocol'</code></td><td>colab CLI 0.7.2 自带的 jupyter-kernel-client 0.8 版本不对。<code>setup.ps1</code> / <code>up.ps1</code> 会自动换成 0.9.0。不要运行 <code>uv tool upgrade google-colab-cli</code>，升级后会被还原；万一升级了，重跑 <code>setup.ps1</code> 即可。</td></tr>
+<tr><td><code>probe x/6 did not answer yet</code></td><td>新机器内核还在启动时会出现 1–2 次，属于正常。每次重试都会打印 <code>last output</code>，一直失败时根据它判断：是编码错误、认证过期，还是 VM 已被回收。</td></tr>
+<tr><td><code>rc=6</code>：显存不足被关机</td><td>分到了 40GB 机器，已经自动关掉。直接重跑 <code>up.ps1</code>。</td></tr>
+<tr><td><code>rc=3</code>：too many assignments</td><td>账户上已有机器在跑。先用 <code>status.ps1</code> 查看，不需要的用 <code>down.ps1</code> 关掉。</td></tr>
+<tr><td>CLI 提示 “No active sessions found”，但机器其实还在</td><td>本地会话记录过期被清掉了，但 VM 还在计费。重跑 <code>up.ps1</code>，会从服务器端重新接回。</td></tr>
+<tr><td><code>bootstrap failed</code></td><td>在 VM 上查看 <code>/content/bootstrap.log</code>（见第 10 节）。wheel 装不上多半是镜像的 Python / torch 版本变了，可以试 <code>-Runtime source</code>（会编译，更耗时）。下载卡住可以设置 <code>HF_HUB_DISABLE_XET=1</code>。</td></tr>
+<tr><td><code>serve_failed</code> / <code>serve_timeout</code></td><td>查看 <code>/content/serve.log</code>，常见原因是显存不足（CacheSize 设得太大）。</td></tr>
+<tr><td>返回 401</td><td>API key 不对。以 <code>.local\endpoint.json</code> 或 VM 上的 <code>/content/api-key.txt</code> 为准。</td></tr>
+<tr><td>第一次请求特别慢</td><td>首次生成会做一次 kernel autotune，属于正常。</td></tr>
+</table>
+<div class="warn">出错退出时机器<b>通常还在计费</b>。暂时修不好就先 <code>down.ps1</code>。</div>
+
+<h2 id="manual">10. 手动操作 VM</h2>
+<p>在同一个 PowerShell 窗口先设置一次：</p>
+<pre><code>$env:PYTHONPATH = "&lt;repo&gt;\win\compat"
+$env:PYTHONUTF8 = "1"</code></pre>
+<p>然后：</p>
+<pre><code>colab sessions                     # 服务器端正在运行（计费）的机器
+colab usage                        # CU 余额
+"print(open('/content/bootstrap.log').read()[-3000:])" | colab exec -s collabosm
+"print(open('/content/serve.log').read()[-3000:])"     | colab exec -s collabosm
+"import subprocess;print(subprocess.run('nvidia-smi',shell=True,capture_output=True,text=True).stdout)" | colab exec -s collabosm
+colab stop -s collabosm            # 等同于 down.ps1</code></pre>
+<p><code>colab console</code>（交互终端）在 Windows 上不可用，请用 <code>colab exec</code>。</p>
+
+<h2 id="files">11. 文件说明</h2>
+<table>
+<tr><th>路径</th><th>作用</th></tr>
+<tr><td><code>win\setup.ps1</code></td><td>一次性安装 + 登录 + 查余额</td></tr>
+<tr><td><code>win\up.ps1</code></td><td>开机 / 恢复 → 上传 → 安装 → 启动服务 → 保存地址</td></tr>
+<tr><td><code>win\collabm.ps1</code> / <code>client\collabm.py</code></td><td>交互终端（启动器 / 本体）</td></tr>
+<tr><td><code>win\install-pwsh7.ps1</code> / <code>add-uv-to-path.ps1</code></td><td>安装 PowerShell 7 + 快捷命令 / 把 uv 加入 PATH</td></tr>
+<tr><td><code>win\test.ps1</code> / <code>status.ps1</code> / <code>down.ps1</code></td><td>测试 / 状态 / 关机</td></tr>
+<tr><td><code>win\common.ps1</code></td><td>共用函数；设置 UTF-8 和 termios 替身</td></tr>
+<tr><td><code>win\compat\termios.py</code></td><td>Windows 兼容替身模块</td></tr>
+<tr><td><code>scripts\restore.py</code></td><td>申请 High-RAM 机器、接回已有机器、验证显存</td></tr>
+<tr><td><code>scripts\bootstrap.sh</code></td><td>（VM）安装运行时 + 下载固定版本的权重</td></tr>
+<tr><td><code>scripts\serve.sh</code> / <code>api_server.py</code></td><td>（VM）启动 API 和隧道</td></tr>
+<tr><td><code>scripts\status.py</code> / <code>probe_gpu.py</code> / <code>get_endpoint.py</code></td><td>（VM）状态、硬件探测、读取地址和 key</td></tr>
+<tr><td><code>.local\</code></td><td>本地状态（地址、key、临时文件），已加入 gitignore</td></tr>
+<tr><td><code>..\collabm-workspace\</code></td><td>collabm 的默认工作区（COLLABM.md、conversations）</td></tr>
+<tr><td><code>docs\RUNBOOK.md</code> / <code>MEASURED.md</code></td><td>原作者的运维经验和实测数据（英文）</td></tr>
+</table>
+<p class="sub" style="margin-top:32px">相对上游的改动见 <code>win\README.md</code> 的 “Changes vs upstream” 一节。</p>
+</div>
+</body>
+</html>

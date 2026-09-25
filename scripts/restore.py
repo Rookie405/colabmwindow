@@ -44,10 +44,23 @@ REGISTRY = os.path.expanduser("~/.config/colab-cli/sessions.json")
 
 def _import_colab_cli():
     """The CLI lives in a uv tool venv; make it importable from any interpreter."""
-    for cand in glob.glob(os.path.expanduser(
-            "~/.local/share/uv/tools/google-colab-cli/lib/python3*/site-packages")):
-        if cand not in sys.path:
-            sys.path.insert(0, cand)
+    roots = [os.path.expanduser("~/.local/share/uv/tools/google-colab-cli")]
+    if os.environ.get("APPDATA"):                           # Windows: %APPDATA%/uv/tools
+        roots.append(os.path.join(os.environ["APPDATA"], "uv", "tools", "google-colab-cli"))
+    if os.environ.get("UV_TOOL_DIR"):
+        roots.append(os.path.join(os.environ["UV_TOOL_DIR"], "google-colab-cli"))
+    try:
+        out = subprocess.run(["uv", "tool", "dir"], capture_output=True, text=True,
+                             timeout=20).stdout.strip()
+        if out:
+            roots.append(os.path.join(out, "google-colab-cli"))
+    except Exception:
+        pass
+    for root in roots:
+        for pat in ("lib/python3*/site-packages", "Lib/site-packages"):
+            for cand in glob.glob(os.path.join(root, pat)):
+                if cand not in sys.path:
+                    sys.path.insert(0, cand)
     try:
         from colab_cli.common import state
         from colab_cli.state import SessionState
@@ -92,8 +105,11 @@ def describe(assignment):
 
 
 def register(state, SessionState, name, endpoint, token, url, accelerator, shape_note=""):
-    state.store.add(SessionState(name=name, token=token, url=url, endpoint=endpoint,
-                                 variant="GPU", accelerator=accelerator))
+    kw = dict(name=name, token=token, url=url, endpoint=endpoint,
+              variant="GPU", accelerator=accelerator)
+    if "machine_shape" in getattr(SessionState, "model_fields", {}):
+        kw["machine_shape"] = "HIGH_RAM" if str(shape_note) in ("hm", "HIGH_RAM") else "STANDARD"
+    state.store.add(SessionState(**kw))
     try:
         state.history.log_event(name, "session_registered",
                                 {"endpoint": endpoint, "accelerator": accelerator,
@@ -131,6 +147,21 @@ def create_high_ram(state, SessionState, name, accelerator, shape_code):
     from colab_cli import client as C
     from colab_cli.client import TUN_ENDPOINT, TooManyAssignmentsError, uuid_to_web_safe_base64
 
+    # google-colab-cli >= 0.7 sends `shape` itself (fix for #47, `colab new --high-mem`).
+    # Use the native path when present; fall back to patching the URL builder otherwise.
+    Shape = getattr(C, "Shape", None)
+    if Shape is not None and "shape" in C.Client.assign.__code__.co_varnames:
+        want = Shape.HIGH_RAM if shape_code == "hm" else None
+        try:
+            res = state.client.assign(uuid.uuid4(), variant=_variant(),
+                                      accelerator=accelerator, shape=want)
+        except TooManyAssignmentsError:
+            raise SystemExit(3)
+        except Exception as exc:
+            print("[restore] assign failed: %s: %s" % (type(exc).__name__, exc))
+            raise SystemExit(4)
+        return _finish_create(state, SessionState, name, res, accelerator, shape_code)
+
     orig = C.Client._build_assign_url
 
     def _build(self, notebook_hash, variant=None, accelerator=None, shape=None):
@@ -153,7 +184,10 @@ def create_high_ram(state, SessionState, name, accelerator, shape_code):
         raise SystemExit(4)
     finally:
         C.Client._build_assign_url = orig
+    return _finish_create(state, SessionState, name, res, accelerator, shape_code)
 
+
+def _finish_create(state, SessionState, name, res, accelerator, shape_code):
     register(state, SessionState, name, res.endpoint, res.runtime_proxy_info.token,
              res.runtime_proxy_info.url, accelerator.value, shape_code)
     granted = "?"
@@ -170,13 +204,19 @@ def create_high_ram(state, SessionState, name, accelerator, shape_code):
 def probe(colab, session, attempts=6):
     """Run scripts/probe_gpu.py on the VM and parse its one-line JSON answer."""
     probe_path = os.path.join(HERE, "probe_gpu.py")
+    # UTF-8 everywhere: on a Japanese/Chinese Windows locale (cp932/cp936) the child CLI
+    # and the pipe decoding otherwise break silently and the probe looks like "no answer".
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    last = ""
     for i in range(1, attempts + 1):
         try:
-            out = subprocess.run([colab, "exec", "-s", session, "--timeout", "180",
-                                  "-f", probe_path],
-                                 capture_output=True, text=True, timeout=300).stdout
-        except Exception:
-            out = ""
+            cp = subprocess.run([colab, "exec", "-s", session, "--timeout", "180",
+                                 "-f", probe_path], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=300, env=env)
+            out = cp.stdout or ""
+            last = ("rc=%s\n%s\n%s" % (cp.returncode, out, cp.stderr or "")).strip()
+        except Exception as exc:
+            out, last = "", "probe call raised %r" % exc
         for line in out.splitlines():
             if line.startswith("PROBE "):
                 try:
@@ -185,12 +225,16 @@ def probe(colab, session, attempts=6):
                     pass
         if i < attempts:
             print("[restore] probe %d/%d did not answer yet; waiting 30 s" % (i, attempts))
+            print("[restore]   last output: %s" % last[-600:].replace("\n", "\n[restore]   "))
             time.sleep(30)
+    print("[restore] last probe output:\n%s" % last[-2000:])
     return None
 
 
 def stop_session(colab, session):
-    subprocess.run([colab, "stop", "-s", session], capture_output=True, text=True, timeout=300)
+    subprocess.run([colab, "stop", "-s", session], capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=300,
+                   env=dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8"))
 
 
 def main():

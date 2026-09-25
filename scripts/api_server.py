@@ -47,6 +47,11 @@ except Exception:
     JTemplate = None
 
 LOCK = threading.Lock()
+# Bearer-key check. serve.sh writes the key before starting this process; upstream generated
+# it but never enforced it, which left the public trycloudflare URL open to anyone.
+KEY_FILE = os.environ.get("API_KEY_FILE", "/content/api-key.txt")
+API_KEY = (os.environ.get("API_KEY") or
+           (open(KEY_FILE).read().strip() if os.path.exists(KEY_FILE) else ""))
 GEN = None
 TOK = None
 ARGS = None
@@ -168,9 +173,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _authorized(self):
+        if not API_KEY:
+            return True
+        got = self.headers.get("Authorization", "")
+        if got == "Bearer " + API_KEY or self.headers.get("x-api-key", "") == API_KEY:
+            return True
+        self._send(401, {"error": {"message": "invalid or missing API key"}})
+        return False
+
     def do_GET(self):
         if self.path.startswith("/health"):
             return self._send(200, "ok", "text/plain")
+        if not self._authorized():
+            return
         if self.path.startswith("/v1/models"):
             return self._send(200, {"object": "list", "data": [
                 {"id": "qwen3.8-flash-next-exl3", "object": "model",
@@ -180,9 +196,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.path.startswith("/v1/chat/completions"):
             return self._send(404, {"error": "not found"})
+        # read the body BEFORE any early reply, or keep-alive parses it as the next request
         try:
             n = int(self.headers.get("Content-Length", "0"))
-            req = json.loads(self.rfile.read(n) or b"{}")
+            raw = self.rfile.read(n)
+        except Exception as exc:
+            return self._send(400, {"error": {"message": "bad request: %r" % exc}})
+        if not self._authorized():
+            return
+        try:
+            req = json.loads(raw or b"{}")
         except Exception as exc:
             return self._send(400, {"error": {"message": "bad json: %r" % exc}})
 
